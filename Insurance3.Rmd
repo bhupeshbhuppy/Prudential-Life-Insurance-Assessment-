@@ -1,0 +1,1166 @@
+---
+title: "Prudential Life Insurance Assessment"
+author: "Bhupesh Joshi"
+output:
+  html_document:
+    theme: united
+    code_folding: hide
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: no
+  mainfont: arial
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE )
+```
+
+
+```{r echo=FALSE, results="asis"}
+cat("
+<style>
+#TOC {
+  margin: 150px 0px 20px 0px;
+}
+h1 {
+   color: #ff0000;
+   font-family: arial;
+ }
+h2 {
+   color: #ff0000;
+   font-family: arial;
+ }
+h3 {
+   color: #ff0000;
+   font-family: arial;
+}
+h4 {
+   color: #ff0000;
+   font-family: arial;
+}
+h5 {
+   color: #ff0000;
+   font-family: arial;
+}
+table.dataTable tbody tr.odd { background-color: red; border:1px #ff0000; }
+table.dataTable tbody tr.even { background-color: white; border:1px #ffffff;}
+
+
+</style>
+<style>
+body {
+text-align: justify}
+</style>
+")
+```
+
+```{r  echo=TRUE,results='hide',fig.keep='all', warning=FALSE,message=FALSE,error=FALSE, include=FALSE}
+    
+### Introductory Code
+
+    library(corrplot)
+    library(plotly)
+    library(dplyr)
+    library(reshape2)
+    library(nFactors)
+    library(nnet)
+    library(stargazer)
+    library(Metrics)
+    library(rattle)
+    library(rpart)
+    library(randomForest)
+    library(ggplot2)
+    library(xgboost)
+    library(DT)
+    library(pROC)
+    library(performanceEstimation)
+    inputfolder<-paste0(getwd(),"/input/")
+    outputfolder<-paste0(getwd(),"/output/")
+    train = read.csv(paste0(inputfolder,"train.csv"))
+    test = read.csv(paste0(inputfolder,"test.csv"))
+  var_kind<-c("Product_Info_", "Ins_Age", "Ht", "Wt","BMI","Employment_Info_","InsuredInfo_",
+                "Insurance_History_", "Family_Hist_","Medical_History_", "Medical_Keyword_")
+
+########## remove variables with excess NAs in both test and train#######
+    rmNAvars<-function(dat,threshold){
+      dat<-dat[, -which(colMeans(is.na(dat)) > threshold)]
+    }
+    train_clean<-rmNAvars(train,0.3)
+    test_clean<-test[,intersect(colnames(test), colnames(train_clean))]
+    
+################### replacing Missing value with median ###########
+    manage_na <- function(datafra)
+    {
+      for(i in 1:ncol(datafra))
+      {
+        if(is.numeric(datafra[,i]))
+        {
+          datafra[is.na(datafra[,i]),i] <- median(datafra[!is.na(datafra[,i]),i])
+        }
+      }
+      datafra
+    }
+    train_clean <- manage_na(train_clean)
+    test_clean <- manage_na(test)
+    train_conti<-train_clean[,c("Product_Info_4", "Ins_Age", "Ht", "Wt", "BMI",
+                                "Employment_Info_1", "Employment_Info_4", "Employment_Info_6")] 
+ 
+    
+####### converting nonnumeric column to numeric ####
+    train_clean[, !(sapply(train_clean, class) == "numeric" | sapply(train_clean, class) == 
+                      "integer")]<-
+      as.numeric(train_clean[, !(sapply(train_clean, class) == "numeric" | 
+                                   sapply(train_clean, class) == "integer")])
+```
+
+
+## **1.	Introduction**
+
+In a one-click shopping world, the life insurance application process is antiquated. Customers provide extensive information to identify risk classification and eligibility, including scheduling medical exams, a process that takes an average of 30 days for the purchase of an Insurance product. Hence, only 40% of U.S. households own individual life insurance. 
+We aim to make the process of issuing life insurance quicker and less labor intensive for new and existing customers to get a quote while maintaining privacy boundaries. The model aims to automate the process of risk assessment for issue of various insurance products. This model will help the firm to generate more revenues by optimally targeting more profitable and less risky customers. The data set used includes the insurance company's earlier data-set that contains various parameters of an insurance application along with a risk score computed by the company's earlier internal model. The results will to better understand the predictive power of the data points in the existing assessment, enabling streamlining the process.
+
+
+## **2.	Data used**
+
+The model data set is pre-separated among training and test sample in the ratio of 3:1 and have a random sampling being done. The train data set is a transactional (low level) data consists of 59,381 customers and 126 variables as predictors. The test dataset contains the same variables for another set of 19,766 customers. The variables are categorized based on the type of information they provide. Due to proprietary reasons the variable names have been masked, however they have been numbered within the category type for identification. The categories of variables present are: 
+&nbsp;
+
+* Product Information
+* Insurance Age
+* Height
+* Weight 
+* BMI
+* Employment Information
+* Insured Information
+* Insurance History
+* Family History
+* Medical History
+* Medical Keyword
+
+&nbsp;
+
+Each of these variable categories contain multiple variables they represent different items under that variable class.
+
+
+
+## **3. Explanatory Data Analysis**
+
+### **3.1	Variable Types**
+
+A primary data analysis was performed through visual inspection of the training data-set to identify the different types of variables among Continuous, Categorical (Nominal and Ordinal) and Dummy (Binary/Indicator) variables. This analysis helps us identify the choice of variable selection and reduction algorithms in the next stage of modelling. 
+&nbsp;
+
+
+```{r echo=TRUE,fig.keep='all', warning=FALSE,message=FALSE,error=FALSE}
+temp1<- data.frame(Variable_Type = c("Product Information",
+"Insurance Age",
+"Height",
+"Weight", 
+"BMI",
+"Employment Information",
+"Insured Information",
+"Insurance History",
+"Family History",
+"Medical History",
+"Medical Keyword"))
+
+temp1$Continous<-c(1,1,1,1,1,3,0,1,4,0,0)
+temp1$Categorical<-c(6,0,0,0,0,3,7,8,1,41,0)
+temp1$Dummy<-c(0,0,0,0,0,0,0,0,0,0,48)
+temp1$Total<-rowSums(temp1[,-1])
+temp1[12,2:5]<-colSums(temp1[,-1])
+temp1$Variable_Type[12]<-"Total"
+datatable(temp1, options = list(pageLength = 13,
+  initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});",
+    "}")))
+```
+&nbsp;
+&nbsp;
+&nbsp;
+
+Continuous variables are analyzed using summary statistics, box plots and density plots. The categorical variables are analyzed using event rate chart to track the variation to the response. 
+
+
+### **3.2 Histogram of Response plot**
+
+&nbsp;
+
+The response is a nominal variable with levels from 1 to 8 and associates to the risk level of a customer
+
+&nbsp;
+&nbsp;
+
+```{r, echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+p<-ggplot(train, aes(x=Response))+geom_histogram(fill="Red", alpha=0.3)
+ggplotly(p, color=~Response, width = 800, height = 400)%>%
+layout(title="Distribution of Response Variable", plot_bgcolor= "white", xaxis=list(gridcolor="lightgrey", opacity=0.5), yaxis=list(gridcolor="lightgrey",opacity = 0.5),autosize = F, width = 800, height = 400)
+
+```
+
+&nbsp;
+&nbsp;
+
+
+While it is not mentioned whether the scale is in increasing order of riskiness or otherwise, from the distribution of the response variable we can infer that 8 could possibly refer to less risky customers
+
+&nbsp;
+&nbsp;
+```{r,echo=TRUE,warning=FALSE,message=FALSE,error=FALSE, results='hide',fig.keep='all', include=FALSE}
+missing_prct<-data.frame(variable=colnames(train),missing=sapply(train,function(x)
+    {sum(is.na(x))}/nrow(train)))
+    missing_prct_test<-data.frame(variable=colnames(test),missing=sapply(test,function(x)
+    {sum(is.na(x))}/nrow(test)))
+```
+
+### **3.3	Summary Statistics**
+
+To allow for easier convergence of machine learning algorithms variables are normalized to the range of [0, 1]. The most common normalizing function used is given below:
+
+$$
+X_{norm} = \frac{x_{i}-x_{min}}{x_{max}-x_{min}}
+$$
+
+The same function had been applied to the continuous variables in the input data-set. The summary statistics help understand the distribution of the underlying dataset, the box plots and density plots enable visualizing the data-set
+&nbsp;
+&nbsp;
+
+```{r}
+## Generating Summary Table
+
+summ_conti<-data.frame(Variables =  colnames(train_conti))
+summ_conti$Min<-apply(train_conti,2,function(x){min(x, na.rm = T)})
+summ_conti$Max<-apply(train_conti,2,function(x){max(x, na.rm = T)})
+summ_conti$Mean<-apply(train_conti,2,function(x){mean(x, na.rm = T)})
+summ_conti$Median<-apply(train_conti,2,function(x){median(x, na.rm = T)})
+datatable(summ_conti, options = list(initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});",
+    "}")))
+```
+&nbsp;
+&nbsp;
+&nbsp;
+
+### **3.4 Continuous Variable Analysis** {.tabset .tabset-fade}
+
+#### Box Plots
+&nbsp;
+The box plots enable visualization of the data-set especially in relation to outliers. However considering the large number of data
+&nbsp;
+&nbsp;
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+
+plt<-htmltools::tagList()
+temp1<-train_conti[1:5]
+p<-plot_ly( data=melt(temp1), type = "box",
+              split = ~variable,y = ~value)%>%
+  layout( title = "Box-Plots of variables")
+  plt[[1]] <- as_widget(p)
+p<-plot_ly( data=melt(train_conti[,6:length(train_conti)]), type = "box",
+              split = ~variable,y = ~value)%>%
+  layout( title = "Box-Plots of variables")
+  plt[[2]] <- as_widget(p)
+plt
+
+```
+
+#### Density Plot
+
+&nbsp;
+&nbsp;
+
+The density plots help visualize the characteristics of the distribution including statistical metrics such as mean, standard deviation and kurtosis. It also enables us to visually identify if any relationship exists with the response variable. For example: The density plot of variable Employment_Info_6 is similar to the histogram of the response variable, this probably indicated that this variable could be a good predictor of the response variable
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+
+temp_melt<-melt(train_conti[,1:2])
+
+   p1<-ggplot(temp_melt,aes(value, fill = variable ))+geom_density(alpha = 0.5)+ggtitle("Density Plots")
+    ggplotly(p1, height= 800, width = 1000)%>%
+      layout(plot_bgcolor="transparent",paper_bgcolor= "transparent",autosize = F, width = 1000, height = 800)
+      temp_melt<-melt(train_conti[,c(3,4,5)])
+ 
+    p2<-ggplot(temp_melt,aes(value, fill = variable ))+geom_density(alpha = 0.5)+ggtitle("Density Plots")
+    ggplotly(p2, height= 800, width = 1000)%>%
+      layout(plot_bgcolor="transparent",paper_bgcolor= "transparent",autosize = F, width = 1000, height = 800)
+    temp_melt<-melt(train_conti[,c(6,8)])
+    p3<-ggplot(temp_melt,aes(value, fill = variable ))+geom_density(alpha = 0.5)+ggtitle("Density Plots")
+    ggplotly(p3, height= 800, width = 1000)%>%
+      layout(plot_bgcolor="transparent",paper_bgcolor= "transparent",autosize = F, width = 1000, height = 800)
+    temp_melt<-melt(train_conti[,7])
+    temp_melt$variable<-"Employment_Info_4"
+    p4<-ggplot(temp_melt,aes(value, fill = variable ))+geom_density(alpha = 0.5)+ggtitle("Density Plots")
+    ggplotly(p4, height= 800, width = 1000)%>%
+      layout(plot_bgcolor="transparent",paper_bgcolor= "transparent",autosize = F, width = 1000, height = 800)
+
+```
+
+
+### **3.5 Missing Value Analysis** {.tabset .tabset-fade}
+
+
+#### Missing Value  Plots {.tabset #missing1}
+
+Missing value percentage charts evaluate whether the variable has sufficient number of data records for predictions. The plot presents the percentage of observations missing for each variable
+
+```{r,echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+
+ par(mfrow=c(2,2))
+ for(i in var_kind){
+   plot(x=as.factor(as.character(missing_prct[grep(i, row.names(missing_prct)),1])),
+        y=missing_prct$missing[grep(i, row.names(missing_prct))], ylim = c(0,1),
+        main =gsub("_"," ",i))
+
+ }
+
+```
+
+
+#### Missing vs Response Chart
+
+&nbsp;
+&nbsp;
+
+This chart enables us to identify whether variables with a high percentage of missing values actually help in predicting the response variable. The distribution missing values for each response category has been retained within the variable and hence the missing values are random in nature.
+
+&nbsp;
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+    train_na_response <- sapply(sort(unique(train$Response)), function(x) { 
+      apply(train[train$Response == x, ], 2, function(y) { sum(is.na(y)) }) })
+    train_na_response<-data.frame(train_na_response)
+    train_na_response<-train_na_response[which(rowSums(train_na_response)>0),]
+    train_na_response$ID<-rownames(train_na_response)
+    train_na_response_melt<-melt(train_na_response)
+    plot_ly(train_na_response_melt, x = ~ID, y =~value , color = ~variable)%>%
+      layout(title ="Missing vs Response Chart")
+```
+
+### **3.6 Event Rate Chart** {.tabset .tabset-fade #event}
+
+&nbsp;
+&nbsp;
+
+In an attempt to capture the conditional probability of the response given a specific bin of the categorical variable 
+
+$$
+P(y=1|ProdInfo_2= A_1)=\frac{P(y=1  \cap  ProdInfo_2= A_1  )}{P(ProdInfo_2= A_1)}
+$$
+&nbsp;
+&nbsp;
+&nbsp;
+
+#### Product Information
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+    
+    train_categ<-train_clean[,-which(colnames(train_clean) %in% colnames(train_conti))]
+    i="Product_Info"
+    train_temp<-train_categ[,grep(i,colnames(train_categ))]
+    index<-1
+    plt<-htmltools::tagList()
+    for (i in colnames(train_temp)){
+      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
+      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
+        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
+               xaxis = list(title = gsub("_"," ",i),showgrid = T))
+      plt[[index]] <- as_widget(p)
+      index <- index + 1
+    }
+    plt
+
+```
+&nbsp;
+&nbsp;
+
+
+#### Employment Information
+
+&nbsp;
+&nbsp;
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+    
+    i="Employment_Info"
+    train_temp<-train_categ[,grep(i,colnames(train_categ))]
+    index<-1
+    plt<-htmltools::tagList()
+    for (i in colnames(train_temp)){
+      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
+      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
+        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
+               xaxis = list(title = gsub("_"," ",i),showgrid = T))
+      plt[[index]] <- as_widget(p)
+      index <- index + 1
+    }
+    plt
+
+```
+&nbsp;
+&nbsp;
+
+#### Insured Information
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+    i="InsuredInfo"
+    train_temp<-train_categ[,grep(i,colnames(train_categ))]
+    index<-1
+    plt<-htmltools::tagList()
+    for (i in colnames(train_temp)){
+      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
+      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
+        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
+               xaxis = list(title = gsub("_"," ",i),showgrid = T))
+      plt[[index]] <- as_widget(p)
+      index <- index + 1
+    }
+    plt
+
+
+```
+&nbsp;
+&nbsp;
+
+#### Insurance History
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+    
+    i="Insurance_History"
+    train_temp<-train_categ[,grep(i,colnames(train_categ))]
+    index<-1
+    plt<-htmltools::tagList()
+    for (i in colnames(train_temp)){
+      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
+      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
+        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
+               xaxis = list(title = gsub("_"," ",i),showgrid = T))
+      plt[[index]] <- as_widget(p)
+      index <- index + 1
+    }
+    plt
+
+
+```
+&nbsp;
+&nbsp;
+
+#### Medical History
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+  par(mfrow=c(2,2))  
+  i="Medical_History"
+    train_temp<-train_categ[,grep(i,colnames(train_categ))]
+    index<-1
+    plt<-htmltools::tagList()
+    for (i in colnames(train_temp)){
+      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
+      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
+        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
+               xaxis = list(title = gsub("_"," ",i),showgrid = T))
+      plt[[index]] <- as_widget(p)
+      index <- index + 1
+    }
+    plt
+
+
+```
+&nbsp;
+&nbsp;
+
+#### Medical Keyword
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+    i="Medical_Keyword"
+    train_temp<-train_categ[,grep(i,colnames(train_categ))]
+    index<-1
+    plt<-htmltools::tagList()
+    for (i in colnames(train_temp)){
+      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
+      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
+        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
+               xaxis = list(title = gsub("_"," ",i),showgrid = T))
+      plt[[index]] <- as_widget(p)
+      index <- index + 1
+    }
+    plt
+
+```
+&nbsp;
+&nbsp;
+&nbsp;
+
+### **3.7 Correlation Plots** {.tabset .tabset-fade #corr}
+
+&nbsp;
+&nbsp;
+
+After data analysis and data treatment, the next stage of model development would be variable reduction. 
+
+&nbsp;
+&nbsp;
+
+
+#### Product Information
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+  i="Product_Info"
+  if(class(train_clean[,grep(i, colnames(train_clean))])=="data.frame"){
+    m<-cor(train_clean[,c(grep(i, colnames(train_clean)),119)])
+    corrplot(m, method = "circle", type="lower")
+  }
+```
+
+
+#### Employment Information
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+  i="Employment_Info"
+  if(class(train_clean[,grep(i, colnames(train_clean))])=="data.frame"){
+    m<-cor(train_clean[,c(grep(i, colnames(train_clean)),119)])
+    corrplot(m, method = "circle", type="lower")
+  }
+```
+
+
+#### Insured Information
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+  i="InsuredInfo_"
+  if(class(train_clean[,grep(i, colnames(train_clean))])=="data.frame"){
+    m<-cor(train_clean[,c(grep(i, colnames(train_clean)),119)])
+    corrplot(m, method = "circle", type="lower")
+  }
+```
+
+
+
+#### Insurance History
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+  i="Insurance_History"
+  if(class(train_clean[,grep(i, colnames(train_clean))])=="data.frame"){
+    m<-cor(train_clean[,c(grep(i, colnames(train_clean)),119)])
+    corrplot(m, method = "circle", type="lower")
+  }
+```
+
+
+#### Medical History
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+  i="Medical_History"
+  if(class(train_clean[,grep(i, colnames(train_clean))])=="data.frame"){
+    m<-cor(train_clean[,c(grep(i, colnames(train_clean)),119)])
+    corrplot(m, method = "circle", type="lower")
+  }
+```
+
+<!---
+
+### Medical Keyword
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+  i="Medical_Keyword"
+  if(class(train_clean[,grep(i, colnames(train_clean))])=="data.frame"){
+    m<-cor(train_clean[,c(grep(i, colnames(train_clean)),118)])
+    corrplot(m, method = "circle", type="lower")
+  }
+```
+--------->
+
+## **4. Variable treatment**
+
+### **4.1 Missing data treatment**
+
+As a preliminary step in data treatment, variables that have a high percentage of missing values are removed. While the threshold for removal is user determined, for this exercise the threshold was 30%.
+
+### **4.2 Missing Value treatment**
+
+For the variables that are not dropped at the previous step of modeling, variables that have missing values in lesser percentages are imputed. The methodology used for imputation is using median of the remaining data series. This is a commonly used industry practice and is efficient as the missing data for all variables is randomly distributed over the response variable.
+
+
+### **4.3 PCA** {.tabset .tabset-fade #PCA}
+
+#### Product Information
+
+```{r}
+train_apca<-data.frame(ID=train_clean$Id)
+i="Product_Info"
+      mydata<-train_clean[,grep(i, colnames(train_clean))]
+      mydata_test<-test_clean[,grep(i, colnames(test_clean))]
+      pca_model<-prcomp(mydata, scale=T)
+      plot(pca_model,main=i,type='l')
+      mydata_hat<-predict(pca_model, as.data.frame(mydata))
+          nS <- nScree(x=eigen(cor(mydata))$values, aparallel=parallel(subject=nrow(mydata),                                        var=ncol(mydata))$eigen$qevpea)
+        optimal_PCA<-nS$Components$noc
+        train_apca<-cbind(train_apca,mydata_hat[,1:optimal_PCA])
+        colnames(train_apca)[grepl("PC",colnames(train_apca))]<-paste0(i,1:optimal_PCA)
+        plotnScree(nS)
+```
+
+#### Employment Information
+
+```{r}
+train_apca<-data.frame(ID=train_clean$Id)
+i="Employment_Info"
+      mydata<-train_clean[,grep(i, colnames(train_clean))]
+      mydata_test<-test_clean[,grep(i, colnames(test_clean))]
+      pca_model<-prcomp(mydata, scale=T)
+      plot(pca_model,main=i,type='l')
+      mydata_hat<-predict(pca_model, as.data.frame(mydata))
+          nS <- nScree(x=eigen(cor(mydata))$values, aparallel=parallel(subject=nrow(mydata),                                        var=ncol(mydata))$eigen$qevpea)
+        optimal_PCA<-nS$Components$noc
+        train_apca<-cbind(train_apca,mydata_hat[,1:optimal_PCA])
+        colnames(train_apca)[grepl("PC",colnames(train_apca))]<-paste0(i,1:optimal_PCA)
+        plotnScree(nS)
+```
+
+#### Insured Information
+
+```{r}
+train_apca<-data.frame(ID=train_clean$Id)
+i="InsuredInfo_"
+      mydata<-train_clean[,grep(i, colnames(train_clean))]
+      mydata_test<-test_clean[,grep(i, colnames(test_clean))]
+      pca_model<-prcomp(mydata, scale=T)
+      plot(pca_model,main=i,type='l')
+      mydata_hat<-predict(pca_model, as.data.frame(mydata))
+          nS <- nScree(x=eigen(cor(mydata))$values, aparallel=parallel(subject=nrow(mydata),                                        var=ncol(mydata))$eigen$qevpea)
+        optimal_PCA<-nS$Components$noc
+        train_apca<-cbind(train_apca,mydata_hat[,1:optimal_PCA])
+        colnames(train_apca)[grepl("PC",colnames(train_apca))]<-paste0(i,1:optimal_PCA)
+        plotnScree(nS)
+```
+
+#### Insurance History
+
+```{r}
+train_apca<-data.frame(ID=train_clean$Id)
+i="Insurance_History"
+      mydata<-train_clean[,grep(i, colnames(train_clean))]
+      mydata_test<-test_clean[,grep(i, colnames(test_clean))]
+      pca_model<-prcomp(mydata, scale=T)
+      plot(pca_model,main=i,type='l')
+      mydata_hat<-predict(pca_model, as.data.frame(mydata))
+          nS <- nScree(x=eigen(cor(mydata))$values, aparallel=parallel(subject=nrow(mydata),                                        var=ncol(mydata))$eigen$qevpea)
+        optimal_PCA<-nS$Components$noc
+        train_apca<-cbind(train_apca,mydata_hat[,1:optimal_PCA])
+        colnames(train_apca)[grepl("PC",colnames(train_apca))]<-paste0(i,1:optimal_PCA)
+        plotnScree(nS)
+```
+
+#### Medical History
+
+```{r}
+train_apca<-data.frame(ID=train_clean$Id)
+i="Medical_History"
+      mydata<-train_clean[,grep(i, colnames(train_clean))]
+      mydata_test<-test_clean[,grep(i, colnames(test_clean))]
+      pca_model<-prcomp(mydata, scale=T)
+      plot(pca_model,main=i,type='l')
+      mydata_hat<-predict(pca_model, as.data.frame(mydata))
+          nS <- nScree(x=eigen(cor(mydata))$values, aparallel=parallel(subject=nrow(mydata),                                        var=ncol(mydata))$eigen$qevpea)
+        optimal_PCA<-nS$Components$noc
+        train_apca<-cbind(train_apca,mydata_hat[,1:optimal_PCA])
+        colnames(train_apca)[grepl("PC",colnames(train_apca))]<-paste0(i,1:optimal_PCA)
+        plotnScree(nS)
+```
+
+#### Medical Keyword
+
+```{r}
+  i="Medical_Keyword"
+      mydata<-train_clean[,grep(i, colnames(train_clean))]
+      mydata_test<-test_clean[,grep(i, colnames(test_clean))]
+      pca_model<-prcomp(mydata, scale=T)
+      plot(pca_model,main=i,type='l')
+      mydata_hat<-predict(pca_model, as.data.frame(mydata))
+          nS <- nScree(x=eigen(cor(mydata))$values, aparallel=parallel(subject=nrow(mydata),                                        var=ncol(mydata))$eigen$qevpea)
+        optimal_PCA<-nS$Components$noc
+        train_apca<-cbind(train_apca,mydata_hat[,1:optimal_PCA])
+        colnames(train_apca)[grepl("PC",colnames(train_apca))]<-paste0(i,1:optimal_PCA)
+        plotnScree(nS)
+```
+
+####
+
+```{r}
+temp1<- data.frame(Variable_Type = c("Product Information",
+"Insurance Age",
+"Height",
+"Weight", 
+"BMI",
+"Employment Information",
+"Insured Information",
+"Insurance History",
+"Family History",
+"Medical History",
+"Medical Keyword"))
+
+temp1$Prior_to_PCA<-c(7,1,1,1,1,6,7,7,1,37,48)
+temp1$After_PCA<-c(2,1,1,1,1,2,1,2,1,6,5)
+temp1[12,2:3]<-colSums(temp1[,-1])
+temp1$Variable_Type[12]<-"Total"
+datatable(temp1, options = list(pageLength = 13,
+  initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});",
+    "}")))
+```
+
+
+
+&nbsp;
+
+&nbsp;
+
+**The dimension of data of post PCA is reduced from `r length(train_clean[,1])` * `r length(train_clean)`   to    `r length(train_apca[,1])` * `r length(train_apca)`**
+
+&nbsp;
+
+
+### **4.4	Boruta Classification Algorithm**
+
+Boruta is an all relevant feature selection wrapper algorithm. The method performs a top-down search for relevant features by comparing original attributes' importance with importance achievable at random.  It computes this by using permuted copies of features, and progressively eliminating irrelevant features. All the atributes post PCA are deemed important by the algorithm.
+
+&nbsp;
+
+
+## **5. Methodology**
+
+### **5.1 Multinominal Logit Model**
+
+&nbsp;
+
+We start by dividing the data inot two portions and using one portion to predict the model and the other portion for model validation and insample prediction.
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+    train_apca$Response<-train$Response
+    train_apca$random <- runif(nrow(train_apca))
+    train_apca_70 <- train_apca[train_apca$random <= 0.7,]
+    train_apca_30 <- train_apca[train_apca$random > 0.7,]
+```
+
+We look at distribution of response on both the portions of train data.
+
+Train data:
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+   temp1<-data.frame(round(table(train_apca_70$Response)/nrow(train_apca_70),2))
+    round(table(train_apca_70$Response)/nrow(train_apca_70),2)
+```
+
+Test data:
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+     temp1$Freq_test<-as.data.frame(round(table(train_apca_30$Response)/nrow(train_apca_30),2))[,2]
+
+round(table(train_apca_30$Response)/nrow(train_apca_30),2)
+```
+&nbsp;
+
+#### Comparing distribution of test and train data
+
+&nbsp;
+```{r}
+plot_ly(data = temp1, x=~Var1,y=~Freq, type = "bar", name="Train")%>%
+      add_trace(y=~Freq_test, name="Test")%>%
+      layout(barmode = 'group')
+```
+
+&nbsp;
+
+The distribution looks same for both the portions therefore we assume that both the portions follow similar distribution.
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all', include=FALSE}
+    nodel.mlm <- multinom(Response ~ ., data = train_apca_70[,-26])
+   #   summary(nodel.mlm)
+    train_apca_30$Prediction<-predict(nodel.mlm, newdata=train_apca_30, type="class")
+    kappa_multi<-ScoreQuadraticWeightedKappa(as.numeric(train_apca_30$Prediction),as.numeric(train_apca_30$Response))
+    auc_multi<-multiclass.roc(train_apca_30$Response,as.numeric(train_apca_30$Prediction),levels = levels(factor(train_apca_30$Response)))
+    accuracy_multi<-(classificationMetrics(train_apca_30$Response,as.numeric(train_apca_30$Prediction)))[1]
+```
+
+&nbsp;
+
+#### Performance Metrics
+
+&nbsp;
+
+The Kappa score for this multinominal model is `r ScoreQuadraticWeightedKappa(as.numeric(train_apca_30$Prediction),as.numeric(train_apca_30$Response))` 
+
+&nbsp;
+
+### **5.2 Random Forest**
+
+&nbsp;
+
+Here as well we start by dividing the data inot two portions and using one portion to predict the model and the other portion for model validation and insample prediction. We will be using the entire data set for prediction.
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+    train_clean$random <- runif(nrow(train_clean))
+    train_clean_70 <- train_clean[train_clean$random <= 0.7,] 
+    train_clean_30 <- train_clean[train_clean$random > 0.7,] 
+```
+
+We look at distribution of response on both the portions of train data.
+
+Train data:
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+     temp1<-data.frame(round(table(train_clean_70$Response)/nrow(train_clean_70),2))
+    round(table(train_clean_70$Response)/nrow(train_clean_70),2)
+
+```
+
+Test data:
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+temp1$Freq_test<-as.data.frame(round(table(train_clean_30$Response)/nrow(train_clean_30),2))[,2]
+round(table(train_clean_30$Response)/nrow(train_clean_30),2)
+```
+
+#### Comparing distribution of test and train data 
+ 
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+plot_ly(data = temp1, x=~Var1,y=~Freq, type = "bar", name="Train")%>%
+      add_trace(y=~Freq_test, name="Test")%>%
+      layout(barmode = 'group')
+```
+
+
+&nbsp;
+&nbsp;
+
+The distribution looks same for both the portions therefore we assume that both the portions follow similar distribution.
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all', include=FALSE}
+    model <- randomForest(Response~., data = train_clean_70[,-c(1,120)], importance = TRUE, ntree = 3)
+    model1<-rpart(Response~., data = train_clean_70[,-c(1,120)])
+    train_clean_30$Prediction <- as.integer(round(predict(model, train_clean_30)))
+    kappa_rf<-ScoreQuadraticWeightedKappa(train_clean_30$Prediction,as.numeric(train_clean_30$Response))
+    auc_rf<-multiclass.roc(train_clean_30$Prediction,as.numeric(train_clean_30$Response),levels = levels(factor(train_clean_30$Response)))
+    accuracy_rf<-classificationMetrics(train_clean_30$Prediction,as.numeric(train_clean_30$Response))[1]
+```
+
+&nbsp;
+&nbsp;
+
+The Kappa score for random forest model is `r ScoreQuadraticWeightedKappa(as.numeric(train_clean_30$Prediction),as.numeric(train_clean_30$Response))` 
+
+&nbsp;
+
+#### The Rattel plot (or tree) used for predicting the model is as follows: 
+
+&nbsp;
+
+
+```{r echo=FALSE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+
+fancyRpartPlot(model1)
+
+```
+
+&nbsp;
+&nbsp;
+
+### 5.3 XGBoost
+
+XGBoost is short for "Extreme Gradient Boosting", where the term "Gradient Boosting" is proposed in the paper Greedy Function Approximation: A Gradient Boosting Machine, by Friedman. XGBoost is based on this original model. XGBoost is used for supervised learning problems, where we use the training data (with multiple features) $x_i$ to predict a target variable $(y_i)$. 
+
+#### 5.3.1 Model and Parameters
+
+The model in supervised learning usually refers to the mathematical structure of how to make the prediction $y_i$ using variables $x_i$. For example, a common model is a linear model, where the prediction is given by,
+
+$$
+y_i = \sum_j\theta_jx_{ij}
+$$
+The response is determined by a linear combination of weighted input features. The prediction value can have different interpretations, depending on the task, i.e., regression or classification. For example, it can be logistic transformed to get the probability of positive class in logistic regression, and it can also be used as a ranking score when we want to rank the outputs.
+The parameters are the undetermined part that we need to learn from data. In linear regression problems, the parameters are the coefficients ??. 
+
+#### 5.3.2	Objective Function: Training Loss + Regularization 
+
+Based on different understandings of y_i we can have different problems, such as regression, classification, ordering, etc. We need to find a way to find the best parameters given the training data. In order to do so, we need to define a so-called objective function, to measure the performance of the model given a certain set of parameters.
+A very important fact about objective functions is that they contain two parts: training loss and regularization.
+
+$$
+Obj(\Theta)= L(\theta)+\Omega(\Theta)
+$$
+where L is the training loss function, and ?? is the regularization term. The training loss measures how predictive our model is on training data. For example, a commonly used training loss is mean squared error.
+
+$$
+L(\theta)= \sum(y_i-\widehat{y_i})^2
+$$
+Another commonly used loss function is logistic loss for logistic regression
+$$
+L(\theta)=\sum[y_i*ln(1+e^{-\widehat{y_i}})+(1-y_i)*ln(1+e^\widehat{y_i})]
+$$
+The regularization term controls the complexity of the model, which helps us to avoid over-fitting. In order to fit visually a step function given the input data points on the upper left corner of the image. Which solution among the three do you think is the best fit?
+
+![Fitting XGBoost](D:\bhupesh\Insurance_Code\Dev\input\XGBoost1.png)
+
+The optimal model is marked in red. The general principle of modelling is that model is both a simple and has good predictive performance. The tradeoff between the two is also referred as bias-variance tradeoff in machine learning.
+
+####  5.3.3	Tree Ensemble
+
+The tree ensemble model is a set of classification and regression trees (CART). Here's a simple example of a CART that classifies whether a claim will be made or not.
+
+![Node Creation](D:\bhupesh\Insurance_Code\Dev\input\XGBoost2.jpg)
+
+We classify the customers into different leaves, and assign them the score on the corresponding leaf. A CART is a bit different from decision trees, where the leaf only contains decision values. In CART, a real score is associated with each of the leaves, which gives us richer interpretations that go beyond classification. This also makes the unified optimization step easier, as we will see in a later part of this tutorial.
+
+![](D:\bhupesh\Insurance_Code\Dev\input\XGBoost3.jpg)
+
+Usually, a single tree is not strong enough to be used in practice. What is actually used is the so-called tree ensemble model, which sums the prediction of multiple trees together.
+Here is an example of a tree ensemble of two trees. The prediction scores of each individual tree are summed up to get the final score. If you look at the example, an important fact is that the two trees try to complement each other. Mathematically, we can write our model in the form
+
+$$
+\widehat{y_i}=\sum_{k=1}^{K}{f_k(x_i)}, f_k\in F
+$$
+where K is the number of trees, f is a function in the functional space FF, and FF is the set of all possible CARTs. Therefore our objective to optimize can be written as
+
+$$
+obj(\theta)=\sum_{i}^{n}(y_i,\widehat{y_i})+\sum_{k=1}^{K}\Omega(f_k)
+$$
+Now here comes the question, what is the model for random forests? It is exactly tree ensembles! So random forests and boosted trees are not different in terms of model, the difference is how we train them. This means if you write a predictive service of tree ensembles, you only need to write one of them and they should directly work for both random forests and boosted trees. One example of why elements of supervised learning rock.
+
+####  5.3.4	Tree Boosting
+
+After introducing the model, let us begin with the real training part. How should we learn the trees? The answer is, as is always for all supervised learning models: define an objective function, and optimize it!
+Assume we have the following objective function (remember it always needs to contain training loss and regularization)
+
+
+$$
+obj(\theta)=\sum_{i}^{n}(y_i,\widehat{y_i})+\sum_{k=1}^{K}\Omega(f_k)
+$$
+
+####  5.3.5	Additive Training
+
+First thing we want to ask is what are the parameters of trees? You can find that what we need to learn are those functions fi, with each containing the structure of the tree and the leaf scores. This is much harder than traditional optimization problem where you can take the gradient and go. It is not easy to train all the trees at once. Instead, we use an additive strategy: fix what we have learned, and add one new tree at a time. We write the prediction value at step t as  $\widehat{y_i}^t$, so we have
+$$
+\begin{split}\hat{y}_i^{(0)} &= 0\\
+\hat{y}_i^{(1)} &= f_1(x_i) = \hat{y}_i^{(0)} + f_1(x_i)\\
+\hat{y}_i^{(2)} &= f_1(x_i) + f_2(x_i)= \hat{y}_i^{(1)} + f_2(x_i)\\
+&\dots\\
+\hat{y}_i^{(t)} &= \sum_{k=1}^t f_k(x_i)= \hat{y}_i^{(t-1)} + f_t(x_i)
+\end{split}
+$$
+
+It remains to ask, which tree do we want at each step? A natural thing is to add the one that optimizes our objective.
+
+$$
+\begin{split}\text{obj}^{(t)} & = \sum_{i=1}^n l(y_i, \hat{y}_i^{(t)}) + \sum_{i=1}^t\Omega(f_i) \\
+          & = \sum_{i=1}^n l(y_i, \hat{y}_i^{(t-1)} + f_t(x_i)) + \Omega(f_t) + constant
+\end{split}
+$$
+If we consider using MSE as our loss function, it becomes the following form.
+
+$$
+\begin{split}\text{obj}^{(t)} & = \sum_{i=1}^n (y_i - (\hat{y}_i^{(t-1)} + f_t(x_i)))^2 + \sum_{i=1}^t\Omega(f_i) \\
+          & = \sum_{i=1}^n [2(\hat{y}_i^{(t-1)} - y_i)f_t(x_i) + f_t(x_i)^2] + \Omega(f_t) + constant
+\end{split}
+$$
+
+The form of MSE is friendly, with a first order term (usually called the residual) and a quadratic term. For other losses of interest (for example, logistic loss), it is not so easy to get such a nice form. So in the general case, we take the Taylor expansion of the loss function up to the second order
+
+
+$$
+\text{obj}^{(t)} = \sum_{i=1}^n [l(y_i, \hat{y}_i^{(t-1)}) + g_i f_t(x_i) + \frac{1}{2} h_i f_t^2(x_i)] + \Omega(f_t) + constant
+$$
+where the $g_i$ and $hi$ are defined as
+$$
+\begin{split}g_i &= \partial_{\hat{y}_i^{(t-1)}} l(y_i, \hat{y}_i^{(t-1)})\\
+h_i &= \partial_{\hat{y}_i^{(t-1)}}^2 l(y_i, \hat{y}_i^{(t-1)})
+\end{split}
+$$
+After we remove all the constants, the specific objective at step t becomes
+
+$$
+\sum_{i=1}^n [g_i f_t(x_i) + \frac{1}{2} h_i f_t^2(x_i)] + \Omega(f_t)
+$$
+This becomes our optimization goal for the new tree. One important advantage of this definition is that it only depends on gi and hi. This is how xgboost can support custom loss functions. We can optimize every loss function, including logistic regression and weighted logistic regression, using exactly the same solver that takes gi and hi as input.
+
+####  5.3.6	Model Complexity
+
+We have introduced the training step, but wait, there is one important thing, the regularization. We need to define the complexity of the tree ??(f). In order to do so, let us first refine the definition of the tree f(x) as
+
+$$
+f_t(x) = w_{q(x)}, w \in R^T, q:R^d\rightarrow \{1,2,\cdots,T\} .
+$$
+Here w is the vector of scores on leaves, q is a function assigning each data point to the corresponding leaf, and T is the number of leaves. In XGBoost, we define the complexity as
+
+$$
+\Omega(f) = \gamma T + \frac{1}{2}\lambda \sum_{j=1}^T w_j^2
+$$
+Of course there is more than one way to define the complexity, but this specific one works well in practice. The regularization is one part most tree packages treat less carefully, or simply ignore. This was because the traditional treatment of tree learning only emphasized improving impurity, while the complexity control was left to heuristics. By defining it formally, we can get a better idea of what we are learning, and yes it works well in practice.
+
+####  5.3.7	The Structure Score
+
+Here is the magical part of the derivation. After re-formalizing the tree model, we can write the objective value with the t-th tree as:
+
+$$
+\begin{split}Obj^{(t)} &\approx \sum_{i=1}^n [g_i w_{q(x_i)} + \frac{1}{2} h_i w_{q(x_i)}^2] + \gamma T + \frac{1}{2}\lambda \sum_{j=1}^T w_j^2\\
+&= \sum^T_{j=1} [(\sum_{i\in I_j} g_i) w_j + \frac{1}{2} (\sum_{i\in I_j} h_i + \lambda) w_j^2 ] + \gamma T
+\end{split}
+$$
+where $I_j={i???q(x_i)=j}$ is the set of indices of data points assigned to the j-th leaf. Notice that in the second line we have changed the index of the summation because all the data points on the same leaf get the same score. We could further compress the expression by defining $G_j = \sum_{i\in I_j} g_i$ and $H_j = \sum_{i\in I_j} h_i$
+
+$$
+\text{obj}^{(t)} = \sum^T_{j=1} [G_jw_j + \frac{1}{2} (H_j+\lambda) w_j^2] +\gamma T
+$$
+In this equation wj are independent with respect to each other, the form $G_jw_j+\frac{1}{2}(H_j+\lambda)w_j^2$ is quadratic and the best wj for a given structure q(x) and the best objective reduction we can get is:
+
+$$
+\begin{split}w_j^\ast = -\frac{G_j}{H_j+\lambda}\\
+\text{obj}^\ast = -\frac{1}{2} \sum_{j=1}^T \frac{G_j^2}{H_j+\lambda} + \gamma T
+\end{split}
+$$
+The last equation measures **how good** a tree structure q(x)q(x) is
+
+![Score Calculation](D:\bhupesh\Insurance_Code\Dev\input\XGBoost4.jpg)
+
+Let's take a look at the picture, and see how the scores can be calculated. Basically, for a given tree structure, we push the statistics gi and hi to the leaves they belong to, sum the statistics together, and use the formula to calculate how good the tree is. This score is like the impurity measure in a decision tree, except that it also takes the model complexity into account.
+
+####  5.3.8	Learn the tree structure
+
+Now that we have a way to measure how good a tree is, ideally we would enumerate all possible trees and pick the best one. In practice this is intractable, so we will try to optimize one level of the tree at a time. Specifically we try to split a leaf into two leaves, and the score it gains is
+
+$$
+Gain = \frac{1}{2} \left[\frac{G_L^2}{H_L+\lambda}+\frac{G_R^2}{H_R+\lambda}-\frac{(G_L+G_R)^2}{H_L+H_R+\lambda}\right] - \gamma
+$$
+This formula can be decomposed as 1) the score on the new left leaf 2) the score on the new right leaf 3) The score on the original leaf 4) regularization on the additional leaf. We can see an important fact here: if the gain is smaller than ??, we would do better not to add that branch. This is exactly the pruning techniques in tree based models! By using the principles of supervised learning, we can naturally come up with the reason these techniques work.
+
+For real valued data, we usually want to search for an optimal split. To efficiently do so, we place all the instances in sorted order, like the following picture. 
+
+![Optimal Split](D:\bhupesh\Insurance_Code\Dev\input\XGBoost5.jpg)
+
+A left to right scan is sufficient to calculate the structure score of all possible split solutions, and we can find the best split efficiently.
+
+####  Outpout from XGBoost
+
+Since we are using the same data set for XGBoost as well we will divide it again.
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all', include=FALSE}
+## dividing data
+    train$random <- runif(nrow(train))
+    
+    train_70 <- train[train$random <= 0.7,] 
+    train_30 <- train[train$random > 0.7,] 
+    
+    #we look at distribution of response on train_70 and train_30
+    
+    round(table(train_70$Response)/nrow(train_70),2)
+    round(table(train_30$Response)/nrow(train_30),2)
+    ### looks same we can proceed
+    # built a model with train_70
+    col_nam<-colnames(train)[2:(length(train_70)-2)]
+    model.xg<- xgboost(data        = data.matrix(train_70[,col_nam]),
+                   label       = train_70$Response,
+                   nrounds     = 100,
+                   objective   = "reg:linear",
+                   eval_metric = "rmse")
+        
+    train_30$Prediction<-as.integer(round(predict(model.xg, data.matrix(train_30[,col_nam]))))
+    train_30[which(train_30$Prediction<1),2] <-1
+    train_30[which(train_30$Prediction>8),2] <-8
+    kappa_xg<-ScoreQuadraticWeightedKappa(train_30$Prediction,as.numeric(train_30$Response))
+    auc_xg<-multiclass.roc(train_30$Response,train_30$Prediction,levels = levels(factor(train_30$Response)))
+    accuracy_xg<-classificationMetrics(train_30$Response,train_30$Prediction)[1]
+
+```
+
+The Kappa score for this model is `r ScoreQuadraticWeightedKappa(as.numeric(train_30$Prediction),as.numeric(train_30$Response))`
+
+&nbsp;
+
+We plot the importance matrix for the top 30 variable.
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+
+    imp_matrix<-xgb.importance(col_nam,model.xg)
+    imp_matrix1<-imp_matrix[c(1:30),]
+    xgb.ggplot.importance(imp_matrix1)
+    
+```
+
+&nbsp;
+
+<!---
+The XGBoost tree 
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+
+  #xgb.plot.tree(feature_names = col_nam,model.xg, n_first_tree = 0)
+
+```
+
+--->
+
+## **6. Output and Results**
+
+### **6.1 Performance Metrics**
+
+#### **Accuracy**
+
+Accuracy is the probablity of correct prediction.
+
+$$
+Accuracy= \frac{N(Correct Prediction)}{N(Total Prediction)}
+$$
+
+#### **Kappa Score**
+
+Quadratic weighted kappa measures the agreement between two ratings. This metric typically varies from 0 (random agreement) to 1 (complete agreement). In the event that there is less agreement between the raters than expected by chance, this metric may go below 0.
+
+In the current dataset the response variable has 8 possible ratings.  Each application is characterized by a tuple (ea,eb), which corresponds to its scores by Rater A (actual risk) and Rater B (predicted risk).  The quadratic weighted kappa is calculated as follows.
+
+First, an N x N histogram matrix O is constructed, such that Oi,j corresponds to the number of applications that received a rating i by A and a rating j by B. An N-by-N matrix of weights, w, is calculated based on the difference between raters' scores:
+
+$$
+w_{i,j} = \frac{\left(i-j\right)^2}{\left(N-1\right)^2}
+$$
+An N-by-N histogram matrix of expected ratings, E, is calculated, assuming that there is no correlation between rating scores.  This is calculated as the outer product between each rater's histogram vector of ratings, normalized such that E and O have the same sum.
+
+From these three metrics, the quadratic weighted kappa is calculated as: 
+
+$$
+\kappa=1-\frac{\sum_{i,j}w_{i,j}O_{i,j}}{\sum_{i,j}w_{i,j}E_{i,j}}.
+$$
+&nbsp;
+&nbsp;
+
+##### We compare the result of all the three algorithms using accuracy Kappa score and area under curve. 
+
+&nbsp;
+&nbsp;
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+    performance_mat<-data.frame(Algorithm=c("Multinominal", "Random Forest", "XGBoost"))
+    performance_mat$Accuracy<-c(round(accuracy_multi,3),round(accuracy_rf,3),round(accuracy_xg,3))
+    performance_mat$AUC<-c(round(auc_multi$auc,3),round(auc_rf$auc,3),round(auc_xg$auc,3))
+    performance_mat$Kappa<-c(round(kappa_multi,3),round(kappa_rf,3),round(kappa_xg,3))
+    datatable(performance_mat, options = list(initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});",
+    "}")))
+    
+    
+```
+
+&nbsp;
+&nbsp;
+
+```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
+plot_ly(data = performance_mat, x=~Algorithm, y=~Accuracy, type = 'scatter', mode = 'lines', name="Accuracy")%>%
+      add_trace(y=~AUC, name="AUC")%>%
+      add_trace(y=~Kappa, name="Kappa Score")%>%
+      layout(title= "Comparision of Preformance Metrics", xaxis=list(title= "Model Type", showgrid=T), yaxis=list(title="Value"))
+```
+
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
+
+Comparing all the three models we find that training the data using Gradent Boosting Algorithim results better result then the traditional model viz. Multinominal Model and Random Forest.
