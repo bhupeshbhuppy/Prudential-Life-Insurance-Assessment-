@@ -75,6 +75,12 @@ text-align: justify}
     library(DT)
     library(pROC)
     library(performanceEstimation)
+    library(rCharts)
+    library(highcharter)
+    library (qcc)
+    library(plotly)
+    library(htmltools)
+    library(magrittr)
     inputfolder<-paste0(getwd(),"/input/")
     outputfolder<-paste0(getwd(),"/output/")
     train = read.csv(paste0(inputfolder,"train.csv"))
@@ -193,10 +199,10 @@ The response is a nominal variable with levels from 1 to 8 and associates to the
 &nbsp;
 &nbsp;
 
-```{r, echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
-p<-ggplot(train, aes(x=Response))+geom_histogram(fill="Red", alpha=0.3)
-ggplotly(p, color=~Response, width = 800, height = 400)%>%
-layout(title="Distribution of Response Variable", plot_bgcolor= "white", xaxis=list(gridcolor="lightgrey", opacity=0.5), yaxis=list(gridcolor="lightgrey",opacity = 0.5),autosize = F, width = 800, height = 400)
+```{r, echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all', results='asis'}
+### Distribution of Response Variable
+hchart(as.character(train$Response), type = "pie")%>%
+  hc_title(text = "Distribution of Response Variable across its range")
 
 ```
 
@@ -276,25 +282,17 @@ The density plots help visualize the characteristics of the distribution includi
 
 ```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
 
-temp_melt<-melt(train_conti[,1:2])
+hcdensity(train_conti[,1], type= "area", name= colnames(train_conti)[1])%>%
+  hc_add_series(density(train_conti[,2]), type= "area", name= colnames(train_conti)[2])
 
-   p1<-ggplot(temp_melt,aes(value, fill = variable ))+geom_density(alpha = 0.5)+ggtitle("Density Plots")
-    ggplotly(p1, height= 800, width = 1000)%>%
-      layout(plot_bgcolor="transparent",paper_bgcolor= "transparent",autosize = F, width = 1000, height = 800)
-      temp_melt<-melt(train_conti[,c(3,4,5)])
- 
-    p2<-ggplot(temp_melt,aes(value, fill = variable ))+geom_density(alpha = 0.5)+ggtitle("Density Plots")
-    ggplotly(p2, height= 800, width = 1000)%>%
-      layout(plot_bgcolor="transparent",paper_bgcolor= "transparent",autosize = F, width = 1000, height = 800)
-    temp_melt<-melt(train_conti[,c(6,8)])
-    p3<-ggplot(temp_melt,aes(value, fill = variable ))+geom_density(alpha = 0.5)+ggtitle("Density Plots")
-    ggplotly(p3, height= 800, width = 1000)%>%
-      layout(plot_bgcolor="transparent",paper_bgcolor= "transparent",autosize = F, width = 1000, height = 800)
-    temp_melt<-melt(train_conti[,7])
-    temp_melt$variable<-"Employment_Info_4"
-    p4<-ggplot(temp_melt,aes(value, fill = variable ))+geom_density(alpha = 0.5)+ggtitle("Density Plots")
-    ggplotly(p4, height= 800, width = 1000)%>%
-      layout(plot_bgcolor="transparent",paper_bgcolor= "transparent",autosize = F, width = 1000, height = 800)
+hcdensity(train_conti[,3], type= "area", name= colnames(train_conti)[3])%>%
+  hc_add_series(density(train_conti[,4]), type= "area", name= colnames(train_conti)[4])%>%
+  hc_add_series(density(train_conti[,5]), type= "area", name= colnames(train_conti)[5])
+
+hcdensity(train_conti[,6], type= "area", name= colnames(train_conti)[6])%>%
+  hc_add_series(density(train_conti[,8]), type= "area", name= colnames(train_conti)[8])
+
+hcdensity(train_conti[,7], type= "area", name= colnames(train_conti)[7])
 
 ```
 
@@ -307,14 +305,15 @@ temp_melt<-melt(train_conti[,1:2])
 Missing value percentage charts evaluate whether the variable has sufficient number of data records for predictions. The plot presents the percentage of observations missing for each variable
 
 ```{r,echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
-
- par(mfrow=c(2,2))
- for(i in var_kind){
-   plot(x=as.factor(as.character(missing_prct[grep(i, row.names(missing_prct)),1])),
-        y=missing_prct$missing[grep(i, row.names(missing_prct))], ylim = c(0,1),
-        main =gsub("_"," ",i))
-
- }
+index<-1
+plt<-htmltools::tagList()
+for(i in var_kind){
+  p<-nPlot(missing ~ variable,data = missing_prct[grep(i, row.names(missing_prct)),],
+        type = "multiBarChart")
+  plt[[index]] <- p$print('iframesrc', cdn =TRUE, include_assets=TRUE)
+  index <- index + 1
+}
+plt
 
 ```
 
@@ -329,14 +328,14 @@ This chart enables us to identify whether variables with a high percentage of mi
 &nbsp;
 
 ```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
-    train_na_response <- sapply(sort(unique(train$Response)), function(x) { 
-      apply(train[train$Response == x, ], 2, function(y) { sum(is.na(y)) }) })
-    train_na_response<-data.frame(train_na_response)
-    train_na_response<-train_na_response[which(rowSums(train_na_response)>0),]
-    train_na_response$ID<-rownames(train_na_response)
-    train_na_response_melt<-melt(train_na_response)
-    plot_ly(train_na_response_melt, x = ~ID, y =~value , color = ~variable)%>%
-      layout(title ="Missing vs Response Chart")
+  train_na_response <- sapply(sort(unique(train$Response)), function(x) { 
+  apply(train[train$Response == x, ], 2, function(y) { sum(is.na(y)) }) })
+train_na_response<-data.frame(train_na_response)
+train_na_response<-train_na_response[which(rowSums(train_na_response)>0),]
+train_na_response$ID<-rownames(train_na_response)
+train_na_response_melt<-melt(train_na_response)
+nPlot(value ~ ID, group = "variable", data = train_na_response_melt,
+      type = "multiBarChart")
 ```
 
 ### **3.6 Event Rate Chart** {.tabset .tabset-fade #event}
@@ -353,141 +352,66 @@ $$
 &nbsp;
 &nbsp;
 
-#### Product Information
-
 ```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
-    
-    train_categ<-train_clean[,-which(colnames(train_clean) %in% colnames(train_conti))]
-    i="Product_Info"
-    train_temp<-train_categ[,grep(i,colnames(train_categ))]
-    index<-1
-    plt<-htmltools::tagList()
-    for (i in colnames(train_temp)){
-      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
-      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
-        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
-               xaxis = list(title = gsub("_"," ",i),showgrid = T))
-      plt[[index]] <- as_widget(p)
-      index <- index + 1
-    }
-    plt
+train_categ<-train_clean[,-which(colnames(train_clean) %in% colnames(train_conti))]
+# create our top-level div for our tabs
+tags$div(
+  # create the tabs with titles as a ul with li/a
+  tags$ul(
+    class="nav nav-tabs",
+    role="tablist",
+    lapply(
+      var_kind,
+      function(p){
+        tags$li(
+          tags$a(
+            "data-toggle"="tab",
+            href=paste0("#tab-",p),
+            p
+          )
+        )
+      }
+    )
+  ),
+  # fill the tabs with our plotly plots
+  tags$div(
+    class="tab-content",
+    lapply(
+      var_kind,
+      function(p){
+         tags$div(
+          #  make the first tabpane active
+          class=ifelse(p==var_kind[1],"tab-pane active","tab-pane"),
+          #  id will need to match the id provided to the a href above
+          id=paste0("tab-",p),
+          train_temp<-train_categ[,grep(p,colnames(train_categ))],
+          index<-1,
+          plt<-list(),
+          for (i in colnames(train_temp)){
+            data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
+            nPlot(Freq ~ Var1, group = "Var2", data = data_freq,
+                     type = "multiBarChart")
+            #p
+            plt[[index]]<-p
+            index<-index+1
+          }
+          as.widget(plt)
+        )
+      }
+    )
+  )
+) %>%
+  # attach the necessary dependencies
+  #  since we are manually doing what rmarkdown magically does for us
+  attachDependencies(
+    list(
+      rmarkdown::html_dependency_jquery(),
+      shiny::bootstrapLib()
+    )
+  )
 
 ```
-&nbsp;
-&nbsp;
 
-
-#### Employment Information
-
-&nbsp;
-&nbsp;
-
-```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
-    
-    i="Employment_Info"
-    train_temp<-train_categ[,grep(i,colnames(train_categ))]
-    index<-1
-    plt<-htmltools::tagList()
-    for (i in colnames(train_temp)){
-      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
-      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
-        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
-               xaxis = list(title = gsub("_"," ",i),showgrid = T))
-      plt[[index]] <- as_widget(p)
-      index <- index + 1
-    }
-    plt
-
-```
-&nbsp;
-&nbsp;
-
-#### Insured Information
-
-```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
-    i="InsuredInfo"
-    train_temp<-train_categ[,grep(i,colnames(train_categ))]
-    index<-1
-    plt<-htmltools::tagList()
-    for (i in colnames(train_temp)){
-      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
-      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
-        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
-               xaxis = list(title = gsub("_"," ",i),showgrid = T))
-      plt[[index]] <- as_widget(p)
-      index <- index + 1
-    }
-    plt
-
-
-```
-&nbsp;
-&nbsp;
-
-#### Insurance History
-
-```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
-    
-    i="Insurance_History"
-    train_temp<-train_categ[,grep(i,colnames(train_categ))]
-    index<-1
-    plt<-htmltools::tagList()
-    for (i in colnames(train_temp)){
-      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
-      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
-        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
-               xaxis = list(title = gsub("_"," ",i),showgrid = T))
-      plt[[index]] <- as_widget(p)
-      index <- index + 1
-    }
-    plt
-
-
-```
-&nbsp;
-&nbsp;
-
-#### Medical History
-
-```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
-  par(mfrow=c(2,2))  
-  i="Medical_History"
-    train_temp<-train_categ[,grep(i,colnames(train_categ))]
-    index<-1
-    plt<-htmltools::tagList()
-    for (i in colnames(train_temp)){
-      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
-      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
-        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
-               xaxis = list(title = gsub("_"," ",i),showgrid = T))
-      plt[[index]] <- as_widget(p)
-      index <- index + 1
-    }
-    plt
-
-
-```
-&nbsp;
-&nbsp;
-
-#### Medical Keyword
-
-```{r echo=TRUE, warning=FALSE,message=FALSE,error=FALSE,fig.keep='all'}
-    i="Medical_Keyword"
-    train_temp<-train_categ[,grep(i,colnames(train_categ))]
-    index<-1
-    plt<-htmltools::tagList()
-    for (i in colnames(train_temp)){
-      data_freq<-as.data.frame(table(train_temp[,i],train_clean$Response)/(as.data.frame(table(train_temp[,i]))[,2]))
-      p<-plot_ly(data_freq, x = ~Var1, y = ~Freq, color = ~Var2, type="bar")%>%
-        layout(title = paste0("Event Rate Chart- ",gsub("_"," ",i)),
-               xaxis = list(title = gsub("_"," ",i),showgrid = T))
-      plt[[index]] <- as_widget(p)
-      index <- index + 1
-    }
-    plt
-
-```
 &nbsp;
 &nbsp;
 &nbsp;
